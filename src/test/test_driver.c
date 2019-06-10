@@ -1563,6 +1563,39 @@ static int testConnectNumOfDomains(virConnectPtr conn)
     return count;
 }
 
+
+# define TEST_CONFIG_FORMAT_ARGV "test-test"
+
+
+static char *testConnectDomainXMLToNative(virConnectPtr conn,
+                                          const char *format,
+                                          const char *dxml,
+                                          unsigned int flags)
+{
+    char *ret = NULL;
+    virDomainDefPtr def = NULL;
+    testDriverPtr privconn = conn->privateData;
+
+    virCheckFlags(0, NULL);
+
+    if (STRNEQ(format, TEST_CONFIG_FORMAT_ARGV)) {
+        virReportError(VIR_ERR_INVALID_ARG,
+                       _("Unsupported config format '%s'"), format);
+        return NULL;
+    }
+
+    if ((def = virDomainDefParseString(dxml, privconn->caps, privconn->xmlopt, NULL,
+                                       VIR_DOMAIN_DEF_PARSE_INACTIVE)) == NULL)
+        goto cleanup;
+
+    ret = virDomainDefFormat(def, privconn->caps, 0);
+
+ cleanup:
+    virDomainDefFree(def);
+    return ret;
+}
+
+
 static int testDomainIsActive(virDomainPtr dom)
 {
     virDomainObjPtr obj;
@@ -6998,6 +7031,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .connectGetType = testConnectGetType, /* 2.3.0 */
     .connectListDomains = testConnectListDomains, /* 0.1.1 */
     .connectNumOfDomains = testConnectNumOfDomains, /* 0.1.1 */
+    .connectDomainXMLToNative = testConnectDomainXMLToNative, /* 5.5.0 */
     .connectListAllDomains = testConnectListAllDomains, /* 0.9.13 */
     .domainCreateXML = testDomainCreateXML, /* 0.1.4 */
     .domainLookupByID = testDomainLookupByID, /* 0.1.1 */
