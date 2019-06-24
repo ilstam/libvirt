@@ -3508,6 +3508,8 @@ testDomainInterfaceAddresses(virDomainPtr dom,
         goto cleanup;
 
     for (i = 0; i < vm->def->nnets; i++) {
+        /* try using different addresses per different inf and domain */
+        const size_t addr_offset = 20 * (vm->def->id - 1) + i + 1;
         const virDomainNetDef *net = vm->def->nets[i];
 
         if (VIR_ALLOC(iface) < 0)
@@ -3525,18 +3527,14 @@ testDomainInterfaceAddresses(virDomainPtr dom,
         iface->naddrs = 1;
 
         if (net->type == VIR_DOMAIN_NET_TYPE_NETWORK) {
-            /* try using different addresses per different inf and domain */
-            const size_t addr_offset = 20 * (vm->def->id - 1) + i + 1;
-
             if (testDomainInterfaceAddressFromNet(dom->conn->privateData,
                                                   net, addr_offset, iface) < 0)
                 goto cleanup;
         } else {
             iface->addrs[0].type = VIR_IP_ADDR_TYPE_IPV4;
             iface->addrs[0].prefix = 24;
-            if (virAsprintf(&iface->addrs[0].addr, "192.168.0.%zu", 1 + i) < 0)
+            if (virAsprintf(&iface->addrs[0].addr, "192.168.0.%zu", addr_offset) < 0)
                 goto cleanup;
-
         }
 
         VIR_APPEND_ELEMENT_INPLACE(ifaces_ret, ifaces_count, iface);
