@@ -6383,6 +6383,147 @@ testNetworkSetAutostart(virNetworkPtr net,
 }
 
 
+static int
+testNetworkGetDHCPLeases(virNetworkPtr net,
+                         const char *mac,
+                         virNetworkDHCPLeasePtr **leases,
+                         unsigned int flags)
+{
+    int ret = -1;
+    int ndomains = 0;
+    size_t i, j;
+    size_t nleases = 0;
+    size_t addr_offset;
+    bool need_results = !!leases;
+    char *hostname = NULL;
+    VIR_AUTOFREE(char *) bridge_name = NULL;
+    char mac_str[VIR_MAC_STRING_BUFLEN];
+    virMacAddr mac_addr;
+    virDomainObjPtr vm = NULL;
+    virDomainPtr *domains = NULL;
+    virDomainNetDefPtr inf = NULL;
+    virNetworkObjPtr obj = NULL;
+    virNetworkDefPtr obj_def = NULL;
+    virNetworkDHCPLeasePtr lease = NULL;
+    virNetworkDHCPLeasePtr *leases_ret = NULL;
+    virDomainInterfacePtr iface = NULL;
+    testDriverPtr privconn = net->conn->privateData;
+
+    virCheckFlags(0, -1);
+
+    if (mac && virMacAddrParse(mac, &mac_addr) < 0) {
+        virReportError(VIR_ERR_INVALID_MAC, "%s", mac);
+        return -1;
+    }
+
+    if (!(obj = testNetworkObjFindByName(privconn, net->name)))
+        return -1;
+
+    obj_def = virNetworkObjGetDef(obj);
+
+    if (VIR_STRDUP(bridge_name, obj_def->bridge) < 0)
+        goto cleanup;
+
+    virNetworkObjEndAPI(&obj);
+
+    if ((ndomains = virDomainObjListExport(privconn->domains, net->conn, &domains,
+                                           NULL, VIR_CONNECT_LIST_DOMAINS_ACTIVE)) < 0)
+        goto cleanup;
+
+    for (i = 0; i < ndomains; i++) {
+        /* the following must be called before testDomObjFromDomain */
+        hostname = testDomainGetHostname(domains[i], 0);
+
+        if (!(vm = testDomObjFromDomain(domains[i])))
+            continue;
+
+        for (j = 0; j < vm->def->nnets; j++) {
+            inf = vm->def->nets[j];
+
+            if (inf->type != VIR_DOMAIN_NET_TYPE_NETWORK ||
+                STRNEQ(inf->data.network.name, net->name))
+                continue;
+
+            virMacAddrFormat(&inf->mac, mac_str);
+            if (mac && virMacAddrCompare(mac, mac_str))
+                continue;
+
+            if (!need_results) {
+                nleases++;
+                continue;
+            }
+
+            if (VIR_ALLOC(lease) < 0 || VIR_ALLOC(iface) < 0 || VIR_ALLOC(iface->addrs) < 0)
+                goto error;
+            iface->naddrs = 1;
+
+            /* should be the same value as in testDomainInterfaceAddresses */
+            addr_offset = 20 * (vm->def->id - 1) + j + 1;
+            if (testDomainInterfaceAddressFromNet(privconn, inf, addr_offset, iface) < 0)
+                goto error;
+
+            if (VIR_STRDUP(lease->mac, mac_str) < 0 ||
+                VIR_STRDUP(lease->iface, bridge_name) < 0 ||
+                VIR_STRDUP(lease->hostname, hostname) < 0 ||
+                VIR_STRDUP(lease->ipaddr, iface->addrs->addr) < 0)
+                goto error;
+
+            lease->prefix = iface->addrs->prefix;
+            lease->type = iface->addrs->type;
+
+            virDomainInterfaceFree(iface);
+            iface = NULL;
+
+            lease->expirytime = 0;
+
+            lease->iaid = NULL;
+            if (lease->type == VIR_IP_ADDR_TYPE_IPV6) {
+                if (VIR_STRDUP(lease->clientid,
+                               "00:01:00:01:16:C1:BA:6E:08:00:27:30:C3:B8") < 0)
+                    goto error;
+            } else {
+                lease->clientid = NULL;
+            }
+
+            if (VIR_INSERT_ELEMENT(leases_ret, nleases, nleases, lease) < 0)
+                goto error;
+        }
+
+        VIR_FREE(hostname);
+        virDomainObjEndAPI(&vm);
+    }
+
+    if (leases_ret) {
+        /* NULL terminated array */
+        ignore_value(VIR_REALLOC_N(leases_ret, nleases + 1));
+        VIR_STEAL_PTR(*leases, leases_ret);
+    }
+
+    ret = nleases;
+
+ cleanup:
+    for (i = 0; i < ndomains; i++)
+        virDomainFree(domains[i]);
+
+    VIR_FREE(domains);
+    VIR_FREE(lease);
+    VIR_FREE(hostname);
+
+    virNetworkObjEndAPI(&obj);
+    virDomainInterfaceFree(iface);
+    virDomainObjEndAPI(&vm);
+    return ret;
+
+ error:
+    if (leases_ret) {
+        for (i = 0; i < nleases; i++)
+            virNetworkDHCPLeaseFree(leases_ret[i]);
+        VIR_FREE(leases_ret);
+    }
+    goto cleanup;
+}
+
+
 /*
  * Physical host interface routines
  */
@@ -10261,6 +10402,7 @@ static virNetworkDriver testNetworkDriver = {
     .networkGetBridgeName = testNetworkGetBridgeName, /* 0.3.2 */
     .networkGetAutostart = testNetworkGetAutostart, /* 0.3.2 */
     .networkSetAutostart = testNetworkSetAutostart, /* 0.3.2 */
+    .networkGetDHCPLeases = testNetworkGetDHCPLeases, /* 5.7.0 */
     .networkIsActive = testNetworkIsActive, /* 0.7.3 */
     .networkIsPersistent = testNetworkIsPersistent, /* 0.7.3 */
 };
