@@ -3433,7 +3433,7 @@ static int testDomainBlockStats(virDomainPtr domain,
 
 static int
 testDomainInterfaceAddressFromNet(testDriverPtr driver,
-                                  const virDomainNetDef *net,
+                                  virDomainNetDefPtr const net,
                                   size_t addr_offset,
                                   virDomainInterfacePtr iface)
 {
@@ -3510,7 +3510,7 @@ testDomainInterfaceAddresses(virDomainPtr dom,
     for (i = 0; i < vm->def->nnets; i++) {
         /* try using different addresses per different inf and domain */
         const size_t addr_offset = 20 * (vm->def->id - 1) + i + 1;
-        const virDomainNetDef *net = vm->def->nets[i];
+        virDomainNetDefPtr const net = vm->def->nets[i];
 
         if (VIR_ALLOC(iface) < 0)
             goto cleanup;
