@@ -3964,6 +3964,52 @@ testDomainGetBlockIoTune(virDomainPtr dom,
 #undef TEST_SET_PARAM
 
 
+static int
+testDomainGetBlkioParameters(virDomainPtr dom,
+                             virTypedParameterPtr params,
+                             int *nparams,
+                             unsigned int flags)
+{
+    virDomainObjPtr vm = NULL;
+    virDomainDefPtr def = NULL;
+    int maxparams = 6;
+    int ret = -1;
+
+    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+                  VIR_DOMAIN_AFFECT_CONFIG |
+                  VIR_TYPED_PARAM_STRING_OKAY, -1);
+
+    if ((*nparams) == 0) {
+        *nparams = 6;
+        return 0;
+    } else if (*nparams < maxparams) {
+        maxparams = *nparams;
+    }
+
+    if (!(vm = testDomObjFromDomain(dom)))
+        return -1;
+
+    if (!(def = virDomainObjGetOneDef(vm, flags)))
+        goto cleanup;
+
+    *nparams = 0;
+
+    if (virTypedParameterAssign(&(params[(*nparams)++]),
+                                VIR_DOMAIN_BLKIO_WEIGHT,
+                                VIR_TYPED_PARAM_UINT,
+                                def->blkio.weight) < 0)
+        goto cleanup;
+
+    if (virDomainGetBlkioParametersAssignFromDef(def, params, nparams, maxparams) < 0)
+        goto cleanup;
+
+    ret = 0;
+ cleanup:
+    virDomainObjEndAPI(&vm);
+    return ret;
+}
+
+
 static int testConnectNumOfDefinedDomains(virConnectPtr conn)
 {
     testDriverPtr privconn = conn->privateData;
@@ -9371,6 +9417,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainGetInterfaceParameters = testDomainGetInterfaceParameters, /* 5.6.0 */
     .domainSetBlockIoTune = testDomainSetBlockIoTune, /* 5.7.0 */
     .domainGetBlockIoTune = testDomainGetBlockIoTune, /* 5.7.0 */
+    .domainGetBlkioParameters = testDomainGetBlkioParameters, /* 5.7.0 */
     .connectListDefinedDomains = testConnectListDefinedDomains, /* 0.1.11 */
     .connectNumOfDefinedDomains = testConnectNumOfDefinedDomains, /* 0.1.11 */
     .domainCreate = testDomainCreate, /* 0.1.11 */
