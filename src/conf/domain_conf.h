@@ -3558,6 +3558,12 @@ bool virDomainDefHasMemballoon(const virDomainDef *def) ATTRIBUTE_NONNULL(1);
 char *virDomainDefGetShortName(const virDomainDef *def) ATTRIBUTE_NONNULL(1);
 
 int
+virDomainParseBlkioDeviceStr(char *blkioDeviceStr,
+                             const char *type,
+                             virBlkioDevicePtr *dev,
+                             size_t *size);
+
+int
 virDomainGetBlkioParametersAssignFromDef(virDomainDefPtr def,
                                          virTypedParameterPtr params,
                                          int *nparams,
