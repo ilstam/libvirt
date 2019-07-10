@@ -2111,74 +2111,6 @@ lxcDomainGetSchedulerParameters(virDomainPtr domain,
     return lxcDomainGetSchedulerParametersFlags(domain, params, nparams, 0);
 }
 
-static int
-lxcDomainMergeBlkioDevice(virBlkioDevicePtr *dest_array,
-                          size_t *dest_size,
-                          virBlkioDevicePtr src_array,
-                          size_t src_size,
-                          const char *type)
-{
-    size_t i, j;
-    virBlkioDevicePtr dest, src;
-
-    for (i = 0; i < src_size; i++) {
-        bool found = false;
-
-        src = &src_array[i];
-        for (j = 0; j < *dest_size; j++) {
-            dest = &(*dest_array)[j];
-            if (STREQ(src->path, dest->path)) {
-                found = true;
-
-                if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_WEIGHT)) {
-                    dest->weight = src->weight;
-                } else if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_READ_IOPS)) {
-                    dest->riops = src->riops;
-                } else if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_WRITE_IOPS)) {
-                    dest->wiops = src->wiops;
-                } else if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_READ_BPS)) {
-                    dest->rbps = src->rbps;
-                } else if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_WRITE_BPS)) {
-                    dest->wbps = src->wbps;
-                } else {
-                    virReportError(VIR_ERR_INVALID_ARG, _("Unknown parameter %s"),
-                                   type);
-                    return -1;
-                }
-
-                break;
-            }
-        }
-        if (!found) {
-            if (!src->weight && !src->riops && !src->wiops && !src->rbps && !src->wbps)
-                continue;
-            if (VIR_EXPAND_N(*dest_array, *dest_size, 1) < 0)
-                return -1;
-            dest = &(*dest_array)[*dest_size - 1];
-
-            if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_WEIGHT)) {
-                dest->weight = src->weight;
-            } else if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_READ_IOPS)) {
-                dest->riops = src->riops;
-            } else if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_WRITE_IOPS)) {
-                dest->wiops = src->wiops;
-            } else if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_READ_BPS)) {
-                dest->rbps = src->rbps;
-            } else if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_WRITE_BPS)) {
-                dest->wbps = src->wbps;
-            } else {
-                *dest_size = *dest_size - 1;
-                return -1;
-            }
-
-            dest->path = src->path;
-            src->path = NULL;
-        }
-    }
-
-    return 0;
-}
-
 
 static int
 lxcDomainBlockStats(virDomainPtr dom,
@@ -2529,7 +2461,7 @@ lxcDomainSetBlkioParameters(virDomainPtr dom,
                 }
 
                 if (j != ndevices ||
-                    lxcDomainMergeBlkioDevice(&def->blkio.devices,
+                    virDomainMergeBlkioDevice(&def->blkio.devices,
                                               &def->blkio.ndevices,
                                               devices, ndevices, param->field) < 0)
                     ret = -1;
@@ -2561,7 +2493,7 @@ lxcDomainSetBlkioParameters(virDomainPtr dom,
                     ret = -1;
                     continue;
                 }
-                if (lxcDomainMergeBlkioDevice(&persistentDef->blkio.devices,
+                if (virDomainMergeBlkioDevice(&persistentDef->blkio.devices,
                                               &persistentDef->blkio.ndevices,
                                               devices, ndevices, param->field) < 0)
                     ret = -1;

@@ -3569,6 +3569,13 @@ virDomainGetBlkioParametersAssignFromDef(virDomainDefPtr def,
                                          int *nparams,
                                          int maxparams);
 
+int
+virDomainMergeBlkioDevice(virBlkioDevicePtr *dest_array,
+                          size_t *dest_size,
+                          virBlkioDevicePtr src_array,
+                          size_t src_size,
+                          const char *type);
+
 int virDomainDiskSetBlockIOTune(virDomainDiskDefPtr disk,
                                 virDomainBlockIoTuneInfo *info);
 
