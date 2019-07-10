@@ -9458,116 +9458,6 @@ static char *qemuDomainGetSchedulerType(virDomainPtr dom,
     return ret;
 }
 
-/* blkioDeviceStr in the form of /device/path,weight,/device/path,weight
- * for example, /dev/disk/by-path/pci-0000:00:1f.2-scsi-0:0:0:0,800
- */
-static int
-qemuDomainParseBlkioDeviceStr(char *blkioDeviceStr, const char *type,
-                              virBlkioDevicePtr *dev, size_t *size)
-{
-    char *temp;
-    int ndevices = 0;
-    int nsep = 0;
-    size_t i;
-    virBlkioDevicePtr result = NULL;
-
-    *dev = NULL;
-    *size = 0;
-
-    if (STREQ(blkioDeviceStr, ""))
-        return 0;
-
-    temp = blkioDeviceStr;
-    while (temp) {
-        temp = strchr(temp, ',');
-        if (temp) {
-            temp++;
-            nsep++;
-        }
-    }
-
-    /* A valid string must have even number of fields, hence an odd
-     * number of commas.  */
-    if (!(nsep & 1))
-        goto parse_error;
-
-    ndevices = (nsep + 1) / 2;
-
-    if (VIR_ALLOC_N(result, ndevices) < 0)
-        return -1;
-
-    i = 0;
-    temp = blkioDeviceStr;
-    while (temp) {
-        char *p = temp;
-
-        /* device path */
-        p = strchr(p, ',');
-        if (!p)
-            goto parse_error;
-
-        if (VIR_STRNDUP(result[i].path, temp, p - temp) < 0)
-            goto cleanup;
-
-        /* value */
-        temp = p + 1;
-
-        if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_WEIGHT)) {
-            if (virStrToLong_uip(temp, &p, 10, &result[i].weight) < 0)
-                goto number_error;
-        } else if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_READ_IOPS)) {
-            if (virStrToLong_uip(temp, &p, 10, &result[i].riops) < 0)
-                goto number_error;
-        } else if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_WRITE_IOPS)) {
-            if (virStrToLong_uip(temp, &p, 10, &result[i].wiops) < 0)
-                goto number_error;
-        } else if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_READ_BPS)) {
-            if (virStrToLong_ullp(temp, &p, 10, &result[i].rbps) < 0)
-                goto number_error;
-        } else if (STREQ(type, VIR_DOMAIN_BLKIO_DEVICE_WRITE_BPS)) {
-            if (virStrToLong_ullp(temp, &p, 10, &result[i].wbps) < 0)
-                goto number_error;
-        } else {
-            virReportError(VIR_ERR_INVALID_ARG,
-                           _("unknown parameter '%s'"), type);
-            goto cleanup;
-        }
-
-        i++;
-
-        if (*p == '\0')
-            break;
-        else if (*p != ',')
-            goto parse_error;
-        temp = p + 1;
-    }
-
-    if (!i)
-        VIR_FREE(result);
-
-    *dev = result;
-    *size = i;
-
-    return 0;
-
- parse_error:
-    virReportError(VIR_ERR_INVALID_ARG,
-                   _("unable to parse blkio device '%s' '%s'"),
-                   type, blkioDeviceStr);
-    goto cleanup;
-
- number_error:
-    virReportError(VIR_ERR_INVALID_ARG,
-                   _("invalid value '%s' for parameter '%s' of device '%s'"),
-                   temp, type, result[i].path);
-
- cleanup:
-    if (result) {
-        virBlkioDeviceArrayClear(result, ndevices);
-        VIR_FREE(result);
-    }
-    return -1;
-}
 
 /* Modify dest_array to reflect all blkio device changes described in
  * src_array.  */
@@ -9718,10 +9608,10 @@ qemuDomainSetBlkioParameters(virDomainPtr dom,
                 virBlkioDevicePtr devices = NULL;
                 size_t j;
 
-                if (qemuDomainParseBlkioDeviceStr(param->value.s,
-                                                  param->field,
-                                                  &devices,
-                                                  &ndevices) < 0) {
+                if (virDomainParseBlkioDeviceStr(param->value.s,
+                                                 param->field,
+                                                 &devices,
+                                                 &ndevices) < 0) {
                     ret = -1;
                     continue;
                 }
@@ -9825,10 +9715,10 @@ qemuDomainSetBlkioParameters(virDomainPtr dom,
                 virBlkioDevicePtr devices = NULL;
                 size_t ndevices;
 
-                if (qemuDomainParseBlkioDeviceStr(param->value.s,
-                                                  param->field,
-                                                  &devices,
-                                                  &ndevices) < 0) {
+                if (virDomainParseBlkioDeviceStr(param->value.s,
+                                                 param->field,
+                                                 &devices,
+                                                 &ndevices) < 0) {
                     ret = -1;
                     continue;
                 }
