@@ -3098,6 +3098,79 @@ testDomainPinIOThread(virDomainPtr dom,
 
 
 static int
+testDomainGetIOThreadInfo(virDomainPtr dom,
+                          virDomainIOThreadInfoPtr **info,
+                          unsigned int flags)
+{
+    virDomainObjPtr vm = NULL;
+    virDomainDefPtr def = NULL;
+    virBitmapPtr cpumask = NULL;
+    virBitmapPtr bitmap = NULL;
+    virDomainIOThreadInfoPtr *info_ret = NULL;
+    size_t i;
+    int hostcpus;
+    int ret = -1;
+
+    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+                  VIR_DOMAIN_AFFECT_CONFIG, -1);
+
+    if (!(vm = testDomObjFromDomain(dom)))
+        goto cleanup;
+
+    if (!(def = virDomainObjGetOneDef(vm, flags)))
+        goto cleanup;
+
+    if (def->niothreadids == 0)
+        goto cleanup;
+
+    if ((hostcpus = virHostCPUGetCount()) < 0)
+        goto cleanup;
+
+    if (VIR_ALLOC_N(info_ret, def->niothreadids) < 0)
+        goto cleanup;
+
+    for (i = 0; i < def->niothreadids; i++) {
+        if (VIR_ALLOC(info_ret[i]) < 0)
+            goto cleanup;
+
+        info_ret[i]->iothread_id = def->iothreadids[i]->iothread_id;
+
+        cpumask = def->iothreadids[i]->cpumask;
+        if (!cpumask) {
+            if (def->cpumask) {
+                cpumask = def->cpumask;
+            } else {
+                if (!(bitmap = virBitmapNew(hostcpus)))
+                    goto cleanup;
+                virBitmapSetAll(bitmap);
+                cpumask = bitmap;
+            }
+        }
+
+        if (virBitmapToData(cpumask, &info_ret[i]->cpumap,
+                            &info_ret[i]->cpumaplen) < 0)
+            goto cleanup;
+
+        virBitmapFree(bitmap);
+        bitmap = NULL;
+    }
+
+    VIR_STEAL_PTR(*info, info_ret);
+    ret = def->niothreadids;
+
+ cleanup:
+    if (info_ret) {
+        for (i = 0; i < def->niothreadids; i++)
+            virDomainIOThreadInfoFree(info_ret[i]);
+        VIR_FREE(info_ret);
+    }
+    virBitmapFree(bitmap);
+    virDomainObjEndAPI(&vm);
+    return ret;
+}
+
+
+static int
 testDomainSetUserPassword(virDomainPtr dom,
                           const char *user ATTRIBUTE_UNUSED,
                           const char *password ATTRIBUTE_UNUSED,
@@ -9554,6 +9627,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainAddIOThread = testDomainAddIOThread, /* 5.7.0 */
     .domainDelIOThread = testDomainDelIOThread, /* 5.7.0 */
     .domainPinIOThread = testDomainPinIOThread, /* 5.7.0 */
+    .domainGetIOThreadInfo = testDomainGetIOThreadInfo, /* 5.7.0 */
     .domainSetUserPassword = testDomainSetUserPassword, /* 5.6.0 */
     .domainPinEmulator = testDomainPinEmulator, /* 5.6.0 */
     .domainGetEmulatorPinInfo = testDomainGetEmulatorPinInfo, /* 5.6.0 */
