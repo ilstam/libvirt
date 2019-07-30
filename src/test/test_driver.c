@@ -4646,6 +4646,295 @@ testDomainFSTrim(virDomainPtr dom,
 }
 
 
+static int
+testDomainAttachDeviceLiveAndConfig(virDomainDefPtr vmdef,
+                                    virDomainDeviceDefPtr dev)
+{
+    virDomainDiskDefPtr disk;
+    virDomainNetDefPtr net;
+    virDomainHostdevDefPtr hostdev;
+    virDomainControllerDefPtr controller;
+    virDomainHostdevDefPtr found;
+    virDomainLeaseDefPtr lease;
+    virDomainFSDefPtr fs;
+    virDomainRedirdevDefPtr redirdev;
+    virDomainShmemDefPtr shmem;
+    char mac[VIR_MAC_STRING_BUFLEN];
+
+    switch (dev->type) {
+        case VIR_DOMAIN_DEVICE_DISK:
+            disk = dev->data.disk;
+            if (virDomainDiskIndexByName(vmdef, disk->dst, true) >= 0) {
+                virReportError(VIR_ERR_INVALID_ARG,
+                               _("target %s already exists."), disk->dst);
+                return -1;
+            }
+
+            if (virDomainDiskInsert(vmdef, disk) < 0)
+                return -1;
+
+            dev->data.disk = NULL;
+            break;
+
+        case VIR_DOMAIN_DEVICE_CONTROLLER:
+            controller = dev->data.controller;
+            if (controller->idx != -1 &&
+                virDomainControllerFind(vmdef, controller->type,
+                                        controller->idx) >= 0) {
+                virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                               _("Target already exists"));
+                return -1;
+            }
+
+            if (virDomainControllerInsert(vmdef, controller) < 0)
+                return -1;
+
+            dev->data.controller = NULL;
+            break;
+
+        case VIR_DOMAIN_DEVICE_NET:
+            net = dev->data.net;
+            if (virDomainHasNet(vmdef, net)) {
+                virReportError(VIR_ERR_INVALID_ARG,
+                               _("network device with mac %s already exists"),
+                               virMacAddrFormat(&net->mac, mac));
+                return -1;
+            }
+
+            if (virDomainNetInsert(vmdef, net))
+                return -1;
+
+            dev->data.net = NULL;
+            break;
+
+        case VIR_DOMAIN_DEVICE_HOSTDEV:
+            hostdev = dev->data.hostdev;
+            if (virDomainHostdevFind(vmdef, hostdev, &found) >= 0) {
+                virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                               _("device is already in the domain configuration"));
+                return -1;
+            }
+
+            if (virDomainHostdevInsert(vmdef, hostdev) < 0)
+                return -1;
+
+            dev->data.hostdev = NULL;
+            break;
+
+        case VIR_DOMAIN_DEVICE_LEASE:
+            lease = dev->data.lease;
+            if (virDomainLeaseIndex(vmdef, lease) >= 0) {
+                virReportError(VIR_ERR_OPERATION_INVALID,
+                               _("Lease %s in lockspace %s already exists"),
+                               lease->key, NULLSTR(lease->lockspace));
+                return -1;
+            }
+
+            if (virDomainLeaseInsert(vmdef, lease) < 0)
+                return -1;
+
+            dev->data.lease = NULL;
+            break;
+
+        case VIR_DOMAIN_DEVICE_FS:
+            fs = dev->data.fs;
+            if (virDomainFSIndexByName(vmdef, fs->dst) >= 0) {
+                virReportError(VIR_ERR_OPERATION_INVALID,
+                             "%s", _("Target already exists"));
+                return -1;
+            }
+
+            if (virDomainFSInsert(vmdef, fs) < 0)
+                return -1;
+
+            dev->data.fs = NULL;
+            break;
+
+        case VIR_DOMAIN_DEVICE_RNG:
+            if (dev->data.rng->info.type != VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE &&
+                virDomainDefHasDeviceAddress(vmdef, &dev->data.rng->info)) {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                               _("a device with the same address already exists "));
+                return -1;
+            }
+
+            if (VIR_APPEND_ELEMENT(vmdef->rngs, vmdef->nrngs, dev->data.rng) < 0)
+                return -1;
+
+            dev->data.rng = NULL;
+            break;
+
+        case VIR_DOMAIN_DEVICE_MEMORY:
+            if (vmdef->nmems == vmdef->mem.memory_slots) {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                               _("no free memory device slot available"));
+                return -1;
+            }
+
+            vmdef->mem.cur_balloon += dev->data.memory->size;
+            if (virDomainMemoryInsert(vmdef, dev->data.memory) < 0)
+                return -1;
+
+            dev->data.memory = NULL;
+            break;
+
+        case VIR_DOMAIN_DEVICE_REDIRDEV:
+            redirdev = dev->data.redirdev;
+
+            if (VIR_APPEND_ELEMENT(vmdef->redirdevs, vmdef->nredirdevs, redirdev) < 0)
+                return -1;
+
+            dev->data.redirdev = NULL;
+            break;
+
+        case VIR_DOMAIN_DEVICE_SHMEM:
+            shmem = dev->data.shmem;
+            if (virDomainShmemDefFind(vmdef, shmem) >= 0) {
+                virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                               _("device is already in the domain configuration"));
+                return -1;
+            }
+
+            if (virDomainShmemDefInsert(vmdef, shmem) < 0)
+                return -1;
+
+            dev->data.shmem = NULL;
+            break;
+
+        case VIR_DOMAIN_DEVICE_WATCHDOG:
+            if (vmdef->watchdog) {
+                virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                               _("domain already has a watchdog"));
+                return -1;
+            }
+            VIR_STEAL_PTR(vmdef->watchdog, dev->data.watchdog);
+            break;
+
+        case VIR_DOMAIN_DEVICE_INPUT:
+            if (VIR_APPEND_ELEMENT(vmdef->inputs, vmdef->ninputs, dev->data.input) < 0)
+                return -1;
+            break;
+
+        case VIR_DOMAIN_DEVICE_VSOCK:
+            if (vmdef->vsock) {
+                virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                               _("domain already has a vsock device"));
+                return -1;
+            }
+            VIR_STEAL_PTR(vmdef->vsock, dev->data.vsock);
+            break;
+
+        default:
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("persistent attach of device is not supported"));
+            return -1;
+    }
+
+    return 0;
+}
+
+
+typedef enum {
+    TEST_DEVICE_ATTACH = 0,
+    TEST_DEVICE_DETACH,
+    TEST_DEVICE_UPDATE,
+} virTestDeviceOperation;
+
+
+static int
+testDomainDeviceOperation(testDriverPtr driver,
+                          virTestDeviceOperation operation,
+                          const char *xml,
+                          const char *alias,
+                          virDomainDefPtr def)
+{
+    virDomainDeviceDefPtr dev = NULL;
+    unsigned int parse_flags = VIR_DOMAIN_DEF_PARSE_INACTIVE;
+    int ret = -1;
+
+    if (operation == TEST_DEVICE_DETACH)
+        parse_flags |= VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE;
+
+    if (xml) {
+        if (!(dev = virDomainDeviceDefParse(xml, def,
+                                            driver->caps, driver->xmlopt,
+                                            NULL, parse_flags)))
+            goto cleanup;
+    } else if (alias) {
+        if (VIR_ALLOC(dev) < 0 || virDomainDefFindDevice(def, alias, dev, true) < 0)
+            goto cleanup;
+    }
+
+    switch (operation) {
+    case TEST_DEVICE_ATTACH:
+        if (testDomainAttachDeviceLiveAndConfig(def, dev) < 0)
+            goto cleanup;
+        break;
+    case TEST_DEVICE_DETACH:
+        break;
+    case TEST_DEVICE_UPDATE:
+        break;
+    }
+
+    ret = 0;
+ cleanup:
+    if (xml)
+        virDomainDeviceDefFree(dev);
+    else
+        VIR_FREE(dev);
+    return ret;
+}
+
+
+static int
+testDomainAttachDetachUpdateDevice(virDomainPtr dom,
+                                   virTestDeviceOperation operation,
+                                   const char *xml,
+                                   const char *alias,
+                                   unsigned int flags)
+{
+    testDriverPtr driver = dom->conn->privateData;
+    virDomainObjPtr vm = NULL;
+    virDomainDefPtr def;
+    virDomainDefPtr persistentDef;
+    int ret = -1;
+
+    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+                  VIR_DOMAIN_AFFECT_CONFIG, -1);
+
+    if (!(vm = testDomObjFromDomain(dom)))
+        goto cleanup;
+
+    if (virDomainObjGetDefs(vm, flags, &def, &persistentDef) < 0)
+        goto cleanup;
+
+    if (persistentDef) {
+        if (testDomainDeviceOperation(driver, operation, xml, alias, persistentDef) < 0)
+            goto cleanup;
+    }
+
+    if (def) {
+        if (testDomainDeviceOperation(driver, operation, xml, alias, def) < 0)
+            goto cleanup;
+    }
+
+    ret = 0;
+ cleanup:
+    virDomainObjEndAPI(&vm);
+    return ret;
+}
+
+
+static int
+testDomainAttachDeviceFlags(virDomainPtr dom,
+                            const char *xml,
+                            unsigned int flags)
+{
+    return testDomainAttachDetachUpdateDevice(dom, TEST_DEVICE_ATTACH,
+                                              xml, NULL, flags);
+}
+
+
 static int testDomainGetAutostart(virDomainPtr domain,
                                   int *autostart)
 {
@@ -9450,6 +9739,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainFSFreeze = testDomainFSFreeze, /* 5.7.0 */
     .domainFSThaw = testDomainFSThaw, /* 5.7.0 */
     .domainFSTrim = testDomainFSTrim, /* 5.7.0 */
+    .domainAttachDeviceFlags = testDomainAttachDeviceFlags, /* 5.7.0 */
     .domainGetAutostart = testDomainGetAutostart, /* 0.3.2 */
     .domainSetAutostart = testDomainSetAutostart, /* 0.3.2 */
     .domainGetDiskErrors = testDomainGetDiskErrors, /* 5.4.0 */
