@@ -4935,6 +4935,14 @@ testDomainAttachDeviceFlags(virDomainPtr dom,
 }
 
 
+static int
+testDomainAttachDevice(virDomainPtr dom,
+                       const char *xml)
+{
+    return testDomainAttachDeviceFlags(dom, xml, VIR_DOMAIN_AFFECT_LIVE);
+}
+
+
 static int testDomainGetAutostart(virDomainPtr domain,
                                   int *autostart)
 {
@@ -9739,6 +9747,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainFSFreeze = testDomainFSFreeze, /* 5.7.0 */
     .domainFSThaw = testDomainFSThaw, /* 5.7.0 */
     .domainFSTrim = testDomainFSTrim, /* 5.7.0 */
+    .domainAttachDevice = testDomainAttachDevice, /* 5.7.0 */
     .domainAttachDeviceFlags = testDomainAttachDeviceFlags, /* 5.7.0 */
     .domainGetAutostart = testDomainGetAutostart, /* 0.3.2 */
     .domainSetAutostart = testDomainSetAutostart, /* 0.3.2 */
