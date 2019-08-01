@@ -4834,6 +4834,171 @@ testDomainAttachDeviceLiveAndConfig(virDomainDefPtr vmdef,
 }
 
 
+static int
+testDomainDetachDeviceLiveAndConfig(virDomainDefPtr vmdef,
+                                    virDomainDeviceDefPtr dev)
+{
+    virDomainDiskDefPtr disk, detach;
+    virDomainHostdevDefPtr hostdev, det_hostdev;
+    virDomainControllerDefPtr cont, det_cont;
+    virDomainNetDefPtr net;
+    virDomainLeaseDefPtr lease, det_lease;
+    virDomainFSDefPtr fs;
+    virDomainMemoryDefPtr mem;
+    int idx;
+
+    switch (dev->type) {
+        case VIR_DOMAIN_DEVICE_DISK:
+            disk = dev->data.disk;
+            if (!(detach = virDomainDiskRemoveByName(vmdef, disk->dst))) {
+                virReportError(VIR_ERR_INVALID_ARG,
+                               _("no target device %s"), disk->dst);
+                return -1;
+            }
+            virDomainDiskDefFree(detach);
+            break;
+
+        case VIR_DOMAIN_DEVICE_CONTROLLER:
+            cont = dev->data.controller;
+            if ((idx = virDomainControllerFind(vmdef, cont->type,
+                                               cont->idx)) < 0) {
+                virReportError(VIR_ERR_INVALID_ARG, "%s",
+                               _("device not present in domain configuration"));
+                return -1;
+            }
+            det_cont = virDomainControllerRemove(vmdef, idx);
+            virDomainControllerDefFree(det_cont);
+            break;
+
+        case VIR_DOMAIN_DEVICE_NET:
+            net = dev->data.net;
+            if ((idx = virDomainNetFindIdx(vmdef, net)) < 0)
+                return -1;
+
+            /* this is guaranteed to succeed */
+            virDomainNetDefFree(virDomainNetRemove(vmdef, idx));
+            break;
+
+        case VIR_DOMAIN_DEVICE_HOSTDEV: {
+            hostdev = dev->data.hostdev;
+            if ((idx = virDomainHostdevFind(vmdef, hostdev, &det_hostdev)) < 0) {
+                virReportError(VIR_ERR_INVALID_ARG, "%s",
+                               _("device not present in domain configuration"));
+                return -1;
+            }
+            virDomainHostdevRemove(vmdef, idx);
+            virDomainHostdevDefFree(det_hostdev);
+            break;
+        }
+
+        case VIR_DOMAIN_DEVICE_LEASE:
+            lease = dev->data.lease;
+            if (!(det_lease = virDomainLeaseRemove(vmdef, lease))) {
+                virReportError(VIR_ERR_DEVICE_MISSING,
+                               _("Lease %s in lockspace %s does not exist"),
+                               lease->key, NULLSTR(lease->lockspace));
+                return -1;
+            }
+            virDomainLeaseDefFree(det_lease);
+            break;
+
+        case VIR_DOMAIN_DEVICE_FS:
+            fs = dev->data.fs;
+            idx = virDomainFSIndexByName(vmdef, fs->dst);
+            if (idx < 0) {
+                virReportError(VIR_ERR_DEVICE_MISSING, "%s",
+                               _("no matching filesystem device was found"));
+                return -1;
+            }
+
+            fs = virDomainFSRemove(vmdef, idx);
+            virDomainFSDefFree(fs);
+            break;
+
+        case VIR_DOMAIN_DEVICE_RNG:
+            if ((idx = virDomainRNGFind(vmdef, dev->data.rng)) < 0) {
+                virReportError(VIR_ERR_DEVICE_MISSING, "%s",
+                               _("no matching RNG device was found"));
+                return -1;
+            }
+
+            virDomainRNGDefFree(virDomainRNGRemove(vmdef, idx));
+            break;
+
+        case VIR_DOMAIN_DEVICE_MEMORY:
+            if ((idx = virDomainMemoryFindInactiveByDef(vmdef,
+                                                        dev->data.memory)) < 0) {
+                virReportError(VIR_ERR_DEVICE_MISSING, "%s",
+                               _("matching memory device was not found"));
+                return -1;
+            }
+            mem = virDomainMemoryRemove(vmdef, idx);
+            vmdef->mem.cur_balloon -= mem->size;
+            virDomainMemoryDefFree(mem);
+            break;
+
+        case VIR_DOMAIN_DEVICE_REDIRDEV:
+            if ((idx = virDomainRedirdevDefFind(vmdef,
+                                                dev->data.redirdev)) < 0) {
+                virReportError(VIR_ERR_DEVICE_MISSING, "%s",
+                               _("no matching redirdev was not found"));
+                return -1;
+            }
+
+            virDomainRedirdevDefFree(virDomainRedirdevDefRemove(vmdef, idx));
+            break;
+
+        case VIR_DOMAIN_DEVICE_SHMEM:
+            if ((idx = virDomainShmemDefFind(vmdef, dev->data.shmem)) < 0) {
+                virReportError(VIR_ERR_DEVICE_MISSING, "%s",
+                               _("matching shmem device was not found"));
+                return -1;
+            }
+
+            virDomainShmemDefFree(virDomainShmemDefRemove(vmdef, idx));
+            break;
+
+
+        case VIR_DOMAIN_DEVICE_WATCHDOG:
+            if (!vmdef->watchdog) {
+                virReportError(VIR_ERR_DEVICE_MISSING, "%s",
+                               _("domain has no watchdog"));
+                return -1;
+            }
+            virDomainWatchdogDefFree(vmdef->watchdog);
+            vmdef->watchdog = NULL;
+            break;
+
+        case VIR_DOMAIN_DEVICE_INPUT:
+            if ((idx = virDomainInputDefFind(vmdef, dev->data.input)) < 0) {
+                virReportError(VIR_ERR_DEVICE_MISSING, "%s",
+                               _("matching input device not found"));
+                return -1;
+            }
+            VIR_DELETE_ELEMENT(vmdef->inputs, idx, vmdef->ninputs);
+            break;
+
+        case VIR_DOMAIN_DEVICE_VSOCK:
+            if (!vmdef->vsock ||
+                !virDomainVsockDefEquals(dev->data.vsock, vmdef->vsock)) {
+                virReportError(VIR_ERR_OPERATION_FAILED, "%s",
+                               _("matching vsock device not found"));
+                return -1;
+            }
+            virDomainVsockDefFree(vmdef->vsock);
+            vmdef->vsock = NULL;
+            break;
+
+        default:
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("persistent detach of device is not supported"));
+            return -1;
+    }
+
+    return 0;
+}
+
+
 typedef enum {
     TEST_DEVICE_ATTACH = 0,
     TEST_DEVICE_DETACH,
@@ -4871,6 +5036,8 @@ testDomainDeviceOperation(testDriverPtr driver,
             goto cleanup;
         break;
     case TEST_DEVICE_DETACH:
+        if (testDomainDetachDeviceLiveAndConfig(def, dev) < 0)
+            goto cleanup;
         break;
     case TEST_DEVICE_UPDATE:
         break;
@@ -4940,6 +5107,16 @@ testDomainAttachDevice(virDomainPtr dom,
                        const char *xml)
 {
     return testDomainAttachDeviceFlags(dom, xml, VIR_DOMAIN_AFFECT_LIVE);
+}
+
+
+static int
+testDomainDetachDeviceFlags(virDomainPtr dom,
+                            const char *xml,
+                            unsigned int flags)
+{
+    return testDomainAttachDetachUpdateDevice(dom, TEST_DEVICE_DETACH,
+                                              xml, NULL, flags);
 }
 
 
@@ -9749,6 +9926,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainFSTrim = testDomainFSTrim, /* 5.7.0 */
     .domainAttachDevice = testDomainAttachDevice, /* 5.7.0 */
     .domainAttachDeviceFlags = testDomainAttachDeviceFlags, /* 5.7.0 */
+    .domainDetachDeviceFlags = testDomainDetachDeviceFlags, /* 5.7.0 */
     .domainGetAutostart = testDomainGetAutostart, /* 0.3.2 */
     .domainSetAutostart = testDomainSetAutostart, /* 0.3.2 */
     .domainGetDiskErrors = testDomainGetDiskErrors, /* 5.4.0 */
