@@ -4999,6 +4999,65 @@ testDomainDetachDeviceLiveAndConfig(virDomainDefPtr vmdef,
 }
 
 
+static int
+testDomainUpdateDeviceLiveAndConfig(virDomainDefPtr vmdef,
+                                    virDomainDeviceDefPtr dev)
+{
+    virDomainDiskDefPtr newDisk;
+    virDomainDeviceDef oldDev = { .type = dev->type };
+    virDomainNetDefPtr net;
+    int idx;
+    int ret = -1;
+
+    switch (dev->type) {
+        case VIR_DOMAIN_DEVICE_DISK:
+            newDisk = dev->data.disk;
+            if ((idx = virDomainDiskIndexByName(vmdef, newDisk->dst, false)) < 0) {
+                virReportError(VIR_ERR_INVALID_ARG,
+                               _("target %s doesn't exist."), newDisk->dst);
+                return -1;
+            }
+
+            oldDev.data.disk = vmdef->disks[idx];
+            if (virDomainDefCompatibleDevice(vmdef, dev, &oldDev,
+                                             VIR_DOMAIN_DEVICE_ACTION_UPDATE,
+                                             false) < 0)
+                return -1;
+
+            virDomainDiskDefFree(vmdef->disks[idx]);
+            vmdef->disks[idx] = newDisk;
+            dev->data.disk = NULL;
+            break;
+
+        case VIR_DOMAIN_DEVICE_NET:
+            net = dev->data.net;
+            if ((idx = virDomainNetFindIdx(vmdef, net)) < 0)
+                goto cleanup;
+
+            oldDev.data.net = vmdef->nets[idx];
+            if (virDomainDefCompatibleDevice(vmdef, dev, &oldDev,
+                                             VIR_DOMAIN_DEVICE_ACTION_UPDATE,
+                                             false) < 0)
+                return -1;
+
+            virDomainNetDefFree(vmdef->nets[idx]);
+            vmdef->nets[idx] = net;
+            dev->data.net = NULL;
+            ret = 0;
+            break;
+
+        default:
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("neither persistent nor live update of device is supported"));
+            goto cleanup;
+    }
+
+    ret = 0;
+ cleanup:
+    return ret;
+}
+
+
 typedef enum {
     TEST_DEVICE_ATTACH = 0,
     TEST_DEVICE_DETACH,
@@ -5040,6 +5099,8 @@ testDomainDeviceOperation(testDriverPtr driver,
             goto cleanup;
         break;
     case TEST_DEVICE_UPDATE:
+        if (testDomainUpdateDeviceLiveAndConfig(def, dev) < 0)
+            goto cleanup;
         break;
     }
 
@@ -5135,6 +5196,16 @@ testDomainDetachDevice(virDomainPtr dom,
                        const char *xml)
 {
     return testDomainDetachDeviceFlags(dom, xml, VIR_DOMAIN_AFFECT_LIVE);
+}
+
+
+static int
+testDomainUpdateDeviceFlags(virDomainPtr dom,
+                            const char *xml,
+                            unsigned int flags)
+{
+    return testDomainAttachDetachUpdateDevice(dom, TEST_DEVICE_UPDATE,
+                                              xml, NULL, flags);
 }
 
 
@@ -9947,6 +10018,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainDetachDevice = testDomainDetachDevice, /* 5.7.0 */
     .domainDetachDeviceFlags = testDomainDetachDeviceFlags, /* 5.7.0 */
     .domainDetachDeviceAlias = testDomainDetachDeviceAlias, /* 5.7.0 */
+    .domainUpdateDeviceFlags = testDomainUpdateDeviceFlags, /* 5.7.0 */
     .domainGetAutostart = testDomainGetAutostart, /* 0.3.2 */
     .domainSetAutostart = testDomainSetAutostart, /* 0.3.2 */
     .domainGetDiskErrors = testDomainGetDiskErrors, /* 5.4.0 */
