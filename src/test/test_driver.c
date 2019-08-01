@@ -5119,6 +5119,17 @@ testDomainDetachDeviceFlags(virDomainPtr dom,
                                               xml, NULL, flags);
 }
 
+
+static int
+testDomainDetachDeviceAlias(virDomainPtr dom,
+                            const char *alias,
+                            unsigned int flags)
+{
+    return testDomainAttachDetachUpdateDevice(dom, TEST_DEVICE_DETACH,
+                                              NULL, alias, flags);
+}
+
+
 static int
 testDomainDetachDevice(virDomainPtr dom,
                        const char *xml)
@@ -9935,6 +9946,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainAttachDeviceFlags = testDomainAttachDeviceFlags, /* 5.7.0 */
     .domainDetachDevice = testDomainDetachDevice, /* 5.7.0 */
     .domainDetachDeviceFlags = testDomainDetachDeviceFlags, /* 5.7.0 */
+    .domainDetachDeviceAlias = testDomainDetachDeviceAlias, /* 5.7.0 */
     .domainGetAutostart = testDomainGetAutostart, /* 0.3.2 */
     .domainSetAutostart = testDomainSetAutostart, /* 0.3.2 */
     .domainGetDiskErrors = testDomainGetDiskErrors, /* 5.4.0 */
