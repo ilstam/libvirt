@@ -7624,6 +7624,35 @@ testDomainManagedSave(virDomainPtr dom, unsigned int flags)
 }
 
 
+static char *
+testDomainManagedSaveGetXMLDesc(virDomainPtr dom,
+                                unsigned int flags)
+{
+    virDomainObjPtr vm;
+    testDriverPtr privconn = dom->conn->privateData;
+    testDomainObjPrivatePtr privdom;
+    char *ret = NULL;
+
+    virCheckFlags(VIR_DOMAIN_SAVE_IMAGE_XML_SECURE, NULL);
+
+    if (!(vm = testDomObjFromDomain(dom)))
+        return NULL;
+
+    if (vm->hasManagedSave == false) {
+        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                       _("domain does not have managed save image"));
+        goto cleanup;
+    }
+
+    privdom = vm->privateData;
+    ret = virDomainDefFormat(privdom->managedDef, privconn->caps, VIR_DOMAIN_DEF_FORMAT_SECURE);
+
+ cleanup:
+    virDomainObjEndAPI(&vm);
+    return ret;
+}
+
+
 static int
 testDomainHasManagedSaveImage(virDomainPtr dom, unsigned int flags)
 {
@@ -9088,6 +9117,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainSendProcessSignal = testDomainSendProcessSignal, /* 5.5.0 */
     .connectGetCPUModelNames = testConnectGetCPUModelNames, /* 1.1.3 */
     .domainManagedSave = testDomainManagedSave, /* 1.1.4 */
+    .domainManagedSaveGetXMLDesc = testDomainManagedSaveGetXMLDesc, /* 5.7.0 */
     .domainHasManagedSaveImage = testDomainHasManagedSaveImage, /* 1.1.4 */
     .domainManagedSaveRemove = testDomainManagedSaveRemove, /* 1.1.4 */
     .domainMemoryStats = testDomainMemoryStats, /* 5.7.0 */
