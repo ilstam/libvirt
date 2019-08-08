@@ -2968,8 +2968,8 @@ static int testDomainGetVcpus(virDomainPtr domain,
     virBitmapSetAll(allcpumap);
 
     /* Clamp to actual number of vcpus */
-    if (maxinfo > virDomainDefGetVcpus(privdom->def))
-        maxinfo = virDomainDefGetVcpus(privdom->def);
+    if (maxinfo > virDomainDefGetVcpusMax(def))
+        maxinfo = virDomainDefGetVcpusMax(def);
 
     memset(info, 0, sizeof(*info) * maxinfo);
     memset(cpumaps, 0, maxinfo * maplen);
@@ -2977,9 +2977,6 @@ static int testDomainGetVcpus(virDomainPtr domain,
     for (i = 0; i < maxinfo; i++) {
         virDomainVcpuDefPtr vcpu = virDomainDefGetVcpu(def, i);
         virBitmapPtr bitmap = NULL;
-
-        if (!vcpu->online)
-            continue;
 
         if (vcpu->cpumask)
             bitmap = vcpu->cpumask;
@@ -2992,7 +2989,7 @@ static int testDomainGetVcpus(virDomainPtr domain,
             virBitmapToDataBuf(bitmap, VIR_GET_CPUMAP(cpumaps, maplen, i), maplen);
 
         info[i].number = i;
-        info[i].state = VIR_VCPU_RUNNING;
+        info[i].state = vcpu->online;
         info[i].cpu = virBitmapLastSetBit(bitmap);
 
         /* Fake an increasing cpu time value */
