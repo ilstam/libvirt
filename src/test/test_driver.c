@@ -2995,6 +2995,81 @@ testDomainSetVcpus(virDomainPtr domain, unsigned int nrCpus)
     return testDomainSetVcpusFlags(domain, nrCpus, VIR_DOMAIN_AFFECT_LIVE);
 }
 
+
+static int
+testDomainSetVcpu(virDomainPtr dom,
+                  const char *cpumap,
+                  int state,
+                  unsigned int flags)
+{
+    virDomainObjPtr vm = NULL;
+    virDomainDefPtr def = NULL;
+    virDomainDefPtr persistentDef = NULL;
+    virBitmapPtr map = NULL;
+    ssize_t lastvcpu;
+    size_t i;
+    int ret = -1;
+
+    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+                  VIR_DOMAIN_AFFECT_CONFIG, -1);
+
+    if (state != 0 && state != 1) {
+        virReportInvalidArg(state, "%s", _("unsupported state value"));
+        return -1;
+    }
+
+    if (virBitmapParse(cpumap, &map, 32) < 0)
+        goto cleanup;
+
+    if ((lastvcpu = virBitmapLastSetBit(map)) < 0) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("no vcpus selected for modification"));
+        goto cleanup;
+    }
+
+    if (!(vm = testDomObjFromDomain(dom)))
+        goto cleanup;
+
+    if (virDomainObjGetDefs(vm, flags, &def, &persistentDef) < 0)
+        goto cleanup;
+
+    if (persistentDef) {
+        if (lastvcpu >= virDomainDefGetVcpusMax(persistentDef)) {
+            virReportError(VIR_ERR_INVALID_ARG,
+                           _("vcpu %zd is not present in persistent config"),
+                           lastvcpu);
+            goto cleanup;
+        }
+    }
+
+    if (def) {
+        if (lastvcpu >= virDomainDefGetVcpusMax(def)) {
+            virReportError(VIR_ERR_INVALID_ARG,
+                           _("vcpu %zd is not present in live config"),
+                           lastvcpu);
+            goto cleanup;
+        }
+    }
+
+    if (virBitmapIsBitSet(map, 0)) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("vCPU '0' can't be modified"));
+        goto cleanup;
+    }
+
+    for (i = 1; i < vm->def->maxvcpus - 1; i++) {
+        if (virBitmapIsBitSet(map, i))
+            vm->def->vcpus[i]->online = state;
+    }
+
+    ret = 0;
+ cleanup:
+    virBitmapFree(map);
+    virDomainObjEndAPI(&vm);
+    return ret;
+}
+
+
 static int testDomainGetVcpus(virDomainPtr domain,
                               virVcpuInfoPtr info,
                               int maxinfo,
@@ -9032,6 +9107,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainGetEmulatorPinInfo = testDomainGetEmulatorPinInfo, /* 5.6.0 */
     .domainSetVcpus = testDomainSetVcpus, /* 0.1.4 */
     .domainSetVcpusFlags = testDomainSetVcpusFlags, /* 0.8.5 */
+    .domainSetVcpu = testDomainSetVcpu, /* 5.7.0 */
     .domainGetVcpusFlags = testDomainGetVcpusFlags, /* 0.8.5 */
     .domainGetGuestVcpus = testDomainGetGuestVcpus, /* 5.7.0 */
     .domainPinVcpu = testDomainPinVcpu, /* 0.7.3 */
