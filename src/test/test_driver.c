@@ -2820,6 +2820,75 @@ testDomainGetVcpusFlags(virDomainPtr domain, unsigned int flags)
     return ret;
 }
 
+
+static int
+testDomainGetGuestVcpus(virDomainPtr dom,
+                        virTypedParameterPtr *params,
+                        unsigned int *nparams,
+                        unsigned int flags)
+{
+    virDomainObjPtr vm = NULL;
+    virBitmapPtr vcpus = NULL;
+    virBitmapPtr online = NULL;
+    virTypedParameterPtr par = NULL;
+    char *tmp = NULL;
+    size_t i;
+    int npar = 0;
+    int maxpar = 0;
+    int ret = -1;
+
+    virCheckFlags(0, ret);
+
+    if (!(vm = testDomObjFromDomain(dom)))
+        goto cleanup;
+
+    if (virDomainObjCheckActive(vm) < 0)
+        goto cleanup;
+
+    if (!(vcpus = virBitmapNew(vm->def->maxvcpus)))
+        goto cleanup;
+
+    if (!(online = virBitmapNew(vm->def->maxvcpus)))
+        goto cleanup;
+
+    for (i = 0; i < vm->def->maxvcpus; i++) {
+        if (virBitmapSetBit(vcpus, i) < 0)
+            goto cleanup;
+
+        if (vm->def->vcpus[i]->online && virBitmapSetBit(online, i) < 0)
+            goto cleanup;
+    }
+
+#define ADD_BITMAP(map, name) \
+    if (!(tmp = virBitmapFormat(map))) \
+        goto cleanup; \
+    if (virTypedParamsAddString(&par, &npar, &maxpar, name, tmp) < 0) \
+        goto cleanup; \
+    VIR_FREE(tmp)
+
+    ADD_BITMAP(vcpus, "vcpus");
+    ADD_BITMAP(online, "online");
+
+    if (virBitmapClearBit(online, 0) < 0)
+        goto cleanup;
+    ADD_BITMAP(online, "offlinable");
+#undef ADD_BITMAP
+
+    *params = par;
+    *nparams = npar;
+    par = NULL;
+
+    ret = 0;
+ cleanup:
+    VIR_FREE(tmp);
+    virBitmapFree(vcpus);
+    virBitmapFree(online);
+    virDomainObjEndAPI(&vm);
+    virTypedParamsFree(par, npar);
+    return ret;
+}
+
+
 static int
 testDomainGetMaxVcpus(virDomainPtr domain)
 {
@@ -8964,6 +9033,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainSetVcpus = testDomainSetVcpus, /* 0.1.4 */
     .domainSetVcpusFlags = testDomainSetVcpusFlags, /* 0.8.5 */
     .domainGetVcpusFlags = testDomainGetVcpusFlags, /* 0.8.5 */
+    .domainGetGuestVcpus = testDomainGetGuestVcpus, /* 5.7.0 */
     .domainPinVcpu = testDomainPinVcpu, /* 0.7.3 */
     .domainPinVcpuFlags = testDomainPinVcpuFlags, /* 5.6.0 */
     .domainGetVcpus = testDomainGetVcpus, /* 0.7.3 */
