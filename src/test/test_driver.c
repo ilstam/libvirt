@@ -404,6 +404,9 @@ struct _testDomainObjPrivate {
     /* used by IOThread APIs */
     size_t num_iothreads;
     testIOThreadInfoPtr *iothreads;
+
+    /* used by managed save APIs */
+    virDomainDefPtr managedDef;
 };
 
 
@@ -426,6 +429,8 @@ testDomainObjPrivateAlloc(void *opaque)
 
     priv->num_iothreads = 0;
     priv->iothreads = NULL;
+
+    priv->managedDef = NULL;
 
     return priv;
 }
@@ -638,6 +643,7 @@ static const unsigned long long defaultPoolAlloc;
 static int testStoragePoolObjSetDefaults(virStoragePoolObjPtr obj);
 static int testNodeGetInfo(virConnectPtr conn, virNodeInfoPtr info);
 static virNetworkObjPtr testNetworkObjFindByName(testDriverPtr privconn, const char *name);
+static int testDomainManagedSaveRemove(virDomainPtr dom, unsigned int flags);
 
 static virDomainObjPtr
 testDomObjFromDomain(virDomainPtr domain)
@@ -720,6 +726,7 @@ testDomainStartState(testDriverPtr privconn,
                      virDomainObjPtr dom,
                      virDomainRunningReason reason)
 {
+    testDomainObjPrivatePtr priv = dom->privateData;
     int ret = -1;
 
     virDomainObjSetState(dom, VIR_DOMAIN_RUNNING, reason);
@@ -731,7 +738,9 @@ testDomainStartState(testDriverPtr privconn,
         goto cleanup;
     }
 
+    virDomainDefFree(priv->managedDef);
     dom->hasManagedSave = false;
+
     ret = 0;
  cleanup:
     if (ret < 0)
@@ -4965,7 +4974,8 @@ static int testDomainUndefineFlags(virDomainPtr domain,
     event = virDomainEventLifecycleNewFromObj(privdom,
                                      VIR_DOMAIN_EVENT_UNDEFINED,
                                      VIR_DOMAIN_EVENT_UNDEFINED_REMOVED);
-    privdom->hasManagedSave = false;
+
+    testDomainManagedSaveRemove(domain, 0);
 
     if (virDomainObjIsActive(privdom))
         privdom->persistent = 0;
@@ -9141,6 +9151,7 @@ static int
 testDomainManagedSave(virDomainPtr dom, unsigned int flags)
 {
     testDriverPtr privconn = dom->conn->privateData;
+    testDomainObjPrivatePtr privdom;
     virDomainObjPtr vm = NULL;
     virObjectEventPtr event = NULL;
     int ret = -1;
@@ -9165,6 +9176,12 @@ testDomainManagedSave(virDomainPtr dom, unsigned int flags)
     event = virDomainEventLifecycleNewFromObj(vm,
                                      VIR_DOMAIN_EVENT_STOPPED,
                                      VIR_DOMAIN_EVENT_STOPPED_SAVED);
+
+    privdom = vm->privateData;
+    virDomainDefFree(privdom->managedDef);
+    privdom->managedDef = virDomainDefCopy(vm->def, privconn->caps,
+                                           privconn->xmlopt, NULL, false);
+
     vm->hasManagedSave = true;
 
     ret = 0;
@@ -9197,11 +9214,15 @@ static int
 testDomainManagedSaveRemove(virDomainPtr dom, unsigned int flags)
 {
     virDomainObjPtr vm;
+    testDomainObjPrivatePtr priv;
 
     virCheckFlags(0, -1);
 
     if (!(vm = testDomObjFromDomain(dom)))
         return -1;
+
+    priv = vm->privateData;
+    virDomainDefFree(priv->managedDef);
 
     vm->hasManagedSave = false;
 
