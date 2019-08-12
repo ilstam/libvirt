@@ -32,4 +32,14 @@ struct _testBlockThreshold {
     unsigned long long threshold;
 };
 
+typedef struct _testIOThreadInfo testIOThreadInfo;
+typedef testIOThreadInfo *testIOThreadInfoPtr;
+
+struct _testIOThreadInfo {
+    unsigned int id;
+    unsigned long long poll_max_ns;
+    unsigned int poll_grow;
+    unsigned int poll_shrink;
+};
+
 int testRegister(void);
