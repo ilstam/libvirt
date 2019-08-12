@@ -3965,6 +3965,81 @@ testDomainGetBlockIoTune(virDomainPtr dom,
 
 
 static int
+testDomainSetBlkioParameters(virDomainPtr dom,
+                             virTypedParameterPtr params,
+                             int nparams,
+                             unsigned int flags)
+{
+    virDomainObjPtr vm = NULL;
+    virDomainDefPtr def = NULL;
+    size_t i;
+    int ret = -1;
+
+    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+                  VIR_DOMAIN_AFFECT_CONFIG, -1);
+
+    if (virTypedParamsValidate(params, nparams,
+                               VIR_DOMAIN_BLKIO_WEIGHT,
+                               VIR_TYPED_PARAM_UINT,
+                               VIR_DOMAIN_BLKIO_DEVICE_WEIGHT,
+                               VIR_TYPED_PARAM_STRING,
+                               VIR_DOMAIN_BLKIO_DEVICE_READ_IOPS,
+                               VIR_TYPED_PARAM_STRING,
+                               VIR_DOMAIN_BLKIO_DEVICE_WRITE_IOPS,
+                               VIR_TYPED_PARAM_STRING,
+                               VIR_DOMAIN_BLKIO_DEVICE_READ_BPS,
+                               VIR_TYPED_PARAM_STRING,
+                               VIR_DOMAIN_BLKIO_DEVICE_WRITE_BPS,
+                               VIR_TYPED_PARAM_STRING,
+                               NULL) < 0)
+        return -1;
+
+    if (!(vm = testDomObjFromDomain(dom)))
+        return -1;
+
+    if (!(def = virDomainObjGetOneDef(vm, flags)))
+        goto cleanup;
+
+    ret = 0;
+
+    for (i = 0; i < nparams; i++) {
+        virTypedParameterPtr param = &params[i];
+
+        if (STREQ(param->field, VIR_DOMAIN_BLKIO_WEIGHT)) {
+            def->blkio.weight = param->value.ui;
+        } else if (STREQ(param->field, VIR_DOMAIN_BLKIO_DEVICE_WEIGHT) ||
+                   STREQ(param->field, VIR_DOMAIN_BLKIO_DEVICE_READ_IOPS) ||
+                   STREQ(param->field, VIR_DOMAIN_BLKIO_DEVICE_WRITE_IOPS) ||
+                   STREQ(param->field, VIR_DOMAIN_BLKIO_DEVICE_READ_BPS) ||
+                   STREQ(param->field, VIR_DOMAIN_BLKIO_DEVICE_WRITE_BPS)) {
+            virBlkioDevicePtr devices = NULL;
+            size_t ndevices;
+
+            if (virDomainParseBlkioDeviceStr(param->value.s,
+                                             param->field,
+                                             &devices,
+                                             &ndevices) < 0) {
+                ret = -1;
+                continue;
+            }
+
+            if (virDomainMergeBlkioDevice(&def->blkio.devices,
+                                          &def->blkio.ndevices,
+                                          devices, ndevices, param->field) < 0)
+                ret = -1;
+
+            virBlkioDeviceArrayClear(devices, ndevices);
+            VIR_FREE(devices);
+        }
+    }
+
+ cleanup:
+    virDomainObjEndAPI(&vm);
+    return ret;
+}
+
+
+static int
 testDomainGetBlkioParameters(virDomainPtr dom,
                              virTypedParameterPtr params,
                              int *nparams,
@@ -9417,6 +9492,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainGetInterfaceParameters = testDomainGetInterfaceParameters, /* 5.6.0 */
     .domainSetBlockIoTune = testDomainSetBlockIoTune, /* 5.7.0 */
     .domainGetBlockIoTune = testDomainGetBlockIoTune, /* 5.7.0 */
+    .domainSetBlkioParameters = testDomainSetBlkioParameters, /* 5.7.0 */
     .domainGetBlkioParameters = testDomainGetBlkioParameters, /* 5.7.0 */
     .connectListDefinedDomains = testConnectListDefinedDomains, /* 0.1.11 */
     .connectNumOfDefinedDomains = testConnectNumOfDefinedDomains, /* 0.1.11 */
