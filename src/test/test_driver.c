@@ -396,6 +396,10 @@ struct _testDomainObjPrivate {
     /* used by get/set time APIs */
     long long seconds;
     unsigned int nseconds;
+
+    /* used by IOThread APIs */
+    size_t num_iothreads;
+    testIOThreadInfoPtr *iothreads;
 };
 
 
@@ -412,6 +416,9 @@ testDomainObjPrivateAlloc(void *opaque)
 
     priv->seconds = 627319920;
     priv->nseconds = 0;
+
+    priv->num_iothreads = 0;
+    priv->iothreads = NULL;
 
     return priv;
 }
@@ -2893,6 +2900,65 @@ testDomainSetVcpusFlags(virDomainPtr domain, unsigned int nrCpus,
 
  cleanup:
     virDomainObjEndAPI(&privdom);
+    return ret;
+}
+
+
+static int
+testDomainAddIOThread(virDomainPtr dom,
+                      unsigned int iothread_id,
+                      unsigned int flags)
+{
+    virDomainObjPtr vm = NULL;
+    virDomainDefPtr def = NULL;
+    virDomainIOThreadIDDefPtr iothrid = NULL;
+    testDomainObjPrivatePtr priv;
+    testIOThreadInfoPtr info;
+    int ret = -1;
+
+    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+                  VIR_DOMAIN_AFFECT_CONFIG, -1);
+
+    if (iothread_id == 0) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("invalid value of 0 for iothread_id"));
+        return -1;
+    }
+
+    if (!(vm = testDomObjFromDomain(dom)))
+        goto cleanup;
+
+    if (!(def = virDomainObjGetOneDef(vm, flags)))
+        goto cleanup;
+
+    if (virDomainIOThreadIDFind(def, iothread_id)) {
+        virReportError(VIR_ERR_INVALID_ARG,
+                       _("an IOThread is already using iothread_id '%u'"),
+                       iothread_id);
+        goto cleanup;
+    }
+
+    if (!virDomainIOThreadIDAdd(def, iothread_id))
+        goto cleanup;
+
+    priv = vm->privateData;
+
+    if (VIR_ALLOC(info) < 0)
+        goto cleanup;
+
+    info->id = iothread_id;
+    info->poll_max_ns = 32768;
+
+    if (VIR_APPEND_ELEMENT(priv->iothreads, priv->num_iothreads, info) < 0)
+        goto cleanup;
+
+    ret = 0;
+ cleanup:
+    if (ret < 0) {
+        virDomainIOThreadIDDefFree(iothrid);
+        VIR_FREE(info);
+    }
+    virDomainObjEndAPI(&vm);
     return ret;
 }
 
@@ -9351,6 +9417,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainSaveImageGetXMLDesc = testDomainSaveImageGetXMLDesc, /* 5.5.0 */
     .domainCoreDump = testDomainCoreDump, /* 0.3.2 */
     .domainCoreDumpWithFormat = testDomainCoreDumpWithFormat, /* 1.2.3 */
+    .domainAddIOThread = testDomainAddIOThread, /* 5.7.0 */
     .domainSetUserPassword = testDomainSetUserPassword, /* 5.6.0 */
     .domainPinEmulator = testDomainPinEmulator, /* 5.6.0 */
     .domainGetEmulatorPinInfo = testDomainGetEmulatorPinInfo, /* 5.6.0 */
