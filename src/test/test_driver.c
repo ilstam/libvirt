@@ -3171,6 +3171,90 @@ testDomainGetIOThreadInfo(virDomainPtr dom,
 
 
 static int
+testDomainSetIOThreadParams(virDomainPtr dom,
+                            unsigned int iothread_id,
+                            virTypedParameterPtr params,
+                            int nparams,
+                            unsigned int flags)
+{
+    virDomainObjPtr vm = NULL;
+    virDomainDefPtr def = NULL;
+    testDomainObjPrivatePtr priv;
+    testIOThreadInfo info_copy;
+    testIOThreadInfoPtr infop = NULL;
+    size_t i;
+    int ret = -1;
+
+    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+                  VIR_DOMAIN_AFFECT_CONFIG, -1);
+
+    if (iothread_id == 0) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("invalid value of 0 for iothread_id"));
+        return -1;
+    }
+
+    if (!(vm = testDomObjFromDomain(dom)))
+        goto cleanup;
+
+    if (!(def = virDomainObjGetOneDef(vm, flags)))
+        goto cleanup;
+
+    if (!virDomainIOThreadIDFind(def, iothread_id)) {
+        virReportError(VIR_ERR_INVALID_ARG,
+                       _("cannot find IOThread '%u' in iothreadids list"),
+                       iothread_id);
+        goto cleanup;
+    }
+
+    if (virTypedParamsValidate(params, nparams,
+                               VIR_DOMAIN_IOTHREAD_POLL_MAX_NS,
+                               VIR_TYPED_PARAM_ULLONG,
+                               VIR_DOMAIN_IOTHREAD_POLL_GROW,
+                               VIR_TYPED_PARAM_UINT,
+                               VIR_DOMAIN_IOTHREAD_POLL_SHRINK,
+                               VIR_TYPED_PARAM_UINT,
+                               NULL) < 0)
+        goto cleanup;
+
+    priv = vm->privateData;
+
+    for (i = 0; i < priv->num_iothreads; i++) {
+        if (iothread_id == priv->iothreads[i]->id) {
+            infop = priv->iothreads[i];
+            break;
+        }
+    }
+
+    if (!infop)
+        goto cleanup;
+
+    memcpy(&info_copy, infop, sizeof(testIOThreadInfo));
+
+    if (virTypedParamsGetULLong(params, nparams,
+                                VIR_DOMAIN_IOTHREAD_POLL_MAX_NS,
+                                &info_copy.poll_max_ns) < 0)
+        goto cleanup;
+
+    if (virTypedParamsGetUInt(params, nparams,
+                              VIR_DOMAIN_IOTHREAD_POLL_GROW,
+                              &info_copy.poll_grow) < 0)
+        goto cleanup;
+
+    if (virTypedParamsGetUInt(params, nparams,
+                              VIR_DOMAIN_IOTHREAD_POLL_SHRINK,
+                              &info_copy.poll_shrink) < 0)
+        goto cleanup;
+
+    memcpy(infop, &info_copy, sizeof(testIOThreadInfo));
+
+    ret = 0;
+ cleanup:
+    virDomainObjEndAPI(&vm);
+    return ret;
+}
+
+static int
 testDomainSetUserPassword(virDomainPtr dom,
                           const char *user ATTRIBUTE_UNUSED,
                           const char *password ATTRIBUTE_UNUSED,
@@ -9628,6 +9712,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainDelIOThread = testDomainDelIOThread, /* 5.7.0 */
     .domainPinIOThread = testDomainPinIOThread, /* 5.7.0 */
     .domainGetIOThreadInfo = testDomainGetIOThreadInfo, /* 5.7.0 */
+    .domainSetIOThreadParams = testDomainSetIOThreadParams, /* 5.7.0 */
     .domainSetUserPassword = testDomainSetUserPassword, /* 5.6.0 */
     .domainPinEmulator = testDomainPinEmulator, /* 5.6.0 */
     .domainGetEmulatorPinInfo = testDomainGetEmulatorPinInfo, /* 5.6.0 */
