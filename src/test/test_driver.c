@@ -4168,6 +4168,42 @@ testDomainPMSuspendForDuration(virDomainPtr dom,
 }
 
 
+static int
+testDomainPMWakeup(virDomainPtr dom,
+                   unsigned int flags)
+{
+    virDomainObjPtr vm;
+    virObjectEventPtr event = NULL;
+    testDriverPtr privconn = dom->conn->privateData;
+    int ret = -1;
+
+    virCheckFlags(0, -1);
+
+    if (!(vm = testDomObjFromDomain(dom)))
+        goto cleanup;
+
+    if (virDomainObjCheckActive(vm) < 0)
+        goto cleanup;
+
+    if (virDomainObjGetState(vm, NULL) != VIR_DOMAIN_PMSUSPENDED) {
+        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                       _("Unable to wake up: guest is not in suspended state"));
+        goto cleanup;
+    }
+
+    virDomainObjSetState(vm, VIR_DOMAIN_RUNNING, VIR_DOMAIN_RUNNING_WAKEUP);
+
+    event = virDomainEventLifecycleNewFromObj(vm, VIR_DOMAIN_EVENT_STARTED,
+                                              VIR_DOMAIN_EVENT_STARTED_WAKEUP);
+
+    ret = 0;
+ cleanup:
+    virDomainObjEndAPI(&vm);
+    virObjectEventStateQueue(privconn->eventState, event);
+    return ret;
+}
+
+
 #define TEST_TOTAL_CPUTIME 48772617035LL
 
 static int
@@ -9494,6 +9530,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainGetMetadata = testDomainGetMetadata, /* 1.1.3 */
     .domainSetMetadata = testDomainSetMetadata, /* 1.1.3 */
     .domainPMSuspendForDuration = testDomainPMSuspendForDuration, /* 5.7.0 */
+    .domainPMWakeup = testDomainPMWakeup, /* 5.7.0 */
     .domainGetCPUStats = testDomainGetCPUStats, /* 5.6.0 */
     .domainSendProcessSignal = testDomainSendProcessSignal, /* 5.5.0 */
     .connectGetCPUModelNames = testConnectGetCPUModelNames, /* 1.1.3 */
