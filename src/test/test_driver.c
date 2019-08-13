@@ -4720,6 +4720,84 @@ static int testDomainSetMetadata(virDomainPtr dom,
     return ret;
 }
 
+
+static int
+testDomainPMSuspendForDuration(virDomainPtr dom,
+                               unsigned int target,
+                               unsigned long long duration,
+                               unsigned int flags)
+{
+    virDomainObjPtr vm;
+    testDriverPtr privconn = dom->conn->privateData;
+    virObjectEventPtr event_suspend = NULL;
+    virObjectEventPtr event_shutdown = NULL;
+    int ret = -1;
+
+    virCheckFlags(0, -1);
+
+    if (duration) {
+        virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
+                       _("Duration not supported. Use 0 for now"));
+        return -1;
+    }
+
+    if (target >= VIR_NODE_SUSPEND_TARGET_LAST) {
+        virReportError(VIR_ERR_INVALID_ARG,
+                       _("Unknown suspend target: %u"),
+                       target);
+        return -1;
+    }
+
+    if (!(vm = testDomObjFromDomain(dom)))
+        return -1;
+
+    if (virDomainObjGetState(vm, NULL) != VIR_DOMAIN_RUNNING) {
+        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                       _("domain is not running"));
+        goto cleanup;
+    }
+
+    if (vm->def->pm.s3 || vm->def->pm.s4) {
+        if (vm->def->pm.s3 == VIR_TRISTATE_BOOL_NO &&
+            (target == VIR_NODE_SUSPEND_TARGET_MEM ||
+             target == VIR_NODE_SUSPEND_TARGET_HYBRID)) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("S3 state is disabled for this domain"));
+            goto cleanup;
+        }
+
+        if (vm->def->pm.s4 == VIR_TRISTATE_BOOL_NO &&
+            target == VIR_NODE_SUSPEND_TARGET_DISK) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("S4 state is disabled for this domain"));
+            goto cleanup;
+        }
+    }
+
+    virDomainObjSetState(vm, VIR_DOMAIN_PMSUSPENDED,
+                         VIR_DOMAIN_PMSUSPENDED_UNKNOWN);
+    event_suspend = virDomainEventLifecycleNewFromObj(vm,
+                                          VIR_DOMAIN_EVENT_PMSUSPENDED,
+                                          VIR_DOMAIN_EVENT_SUSPENDED_PAUSED);
+    virObjectEventStateQueue(privconn->eventState, event_suspend);
+
+    if (target == VIR_NODE_SUSPEND_TARGET_DISK) {
+        testDomainShutdownState(dom, vm, VIR_DOMAIN_SHUTOFF_SHUTDOWN);
+        event_shutdown = virDomainEventLifecycleNewFromObj(vm,
+                                               VIR_DOMAIN_EVENT_STOPPED,
+                                               VIR_DOMAIN_EVENT_STOPPED_SHUTDOWN);
+        if (!vm->persistent)
+            virDomainObjListRemove(privconn->domains, vm);
+    }
+
+    ret = 0;
+ cleanup:
+    virDomainObjEndAPI(&vm);
+    virObjectEventStateQueue(privconn->eventState, event_shutdown);
+    return ret;
+}
+
+
 #define TEST_TOTAL_CPUTIME 48772617035LL
 
 static int
@@ -10916,6 +10994,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainSendKey = testDomainSendKey, /* 5.5.0 */
     .domainGetMetadata = testDomainGetMetadata, /* 1.1.3 */
     .domainSetMetadata = testDomainSetMetadata, /* 1.1.3 */
+    .domainPMSuspendForDuration = testDomainPMSuspendForDuration, /* 5.7.0 */
     .domainGetCPUStats = testDomainGetCPUStats, /* 5.6.0 */
     .domainSendProcessSignal = testDomainSendProcessSignal, /* 5.5.0 */
     .connectGetCPUModelNames = testConnectGetCPUModelNames, /* 1.1.3 */
