@@ -1529,6 +1529,26 @@ static int testConnectGetMaxVcpus(virConnectPtr conn ATTRIBUTE_UNUSED,
     return 32;
 }
 
+
+static int
+testConnectCompareCPU(virConnectPtr conn,
+                      const char *xmlDesc,
+                      unsigned int flags)
+{
+    testDriverPtr privconn = conn->privateData;
+    bool failIncompatible = !!(flags & VIR_CONNECT_COMPARE_CPU_FAIL_INCOMPATIBLE);
+    int ret = VIR_CPU_COMPARE_ERROR;
+
+    virCheckFlags(VIR_CONNECT_COMPARE_CPU_FAIL_INCOMPATIBLE,
+                  VIR_CPU_COMPARE_ERROR);
+
+    ret = virCPUCompareXML(privconn->caps->host.arch, privconn->caps->host.cpu,
+                           xmlDesc, failIncompatible);
+
+    return ret;
+}
+
+
 static char *
 testConnectBaselineCPU(virConnectPtr conn ATTRIBUTE_UNUSED,
                        const char **xmlCPUs,
@@ -9510,6 +9530,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainRevertToSnapshot = testDomainRevertToSnapshot, /* 1.1.4 */
     .domainSnapshotDelete = testDomainSnapshotDelete, /* 1.1.4 */
 
+    .connectCompareCPU =  testConnectCompareCPU, /* 5.7.0 */
     .connectBaselineCPU = testConnectBaselineCPU, /* 1.2.0 */
     .domainCheckpointCreateXML = testDomainCheckpointCreateXML, /* 5.6.0 */
     .domainCheckpointGetXMLDesc = testDomainCheckpointGetXMLDesc, /* 5.6.0 */
