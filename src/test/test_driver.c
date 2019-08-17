@@ -3516,6 +3516,17 @@ testDomainSetVcpu(virDomainPtr dom,
 }
 
 
+static int
+testDomainSetGuestVcpus(virDomainPtr dom,
+                        const char *cpumap,
+                        int state,
+                        unsigned int flags)
+{
+    virCheckFlags(0, -1);
+    return testDomainSetVcpu(dom, cpumap, state, VIR_DOMAIN_AFFECT_LIVE);
+}
+
+
 static int testDomainGetVcpus(virDomainPtr domain,
                               virVcpuInfoPtr info,
                               int maxinfo,
@@ -11106,6 +11117,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainSetVcpusFlags = testDomainSetVcpusFlags, /* 0.8.5 */
     .domainGetVcpusFlags = testDomainGetVcpusFlags, /* 0.8.5 */
     .domainGetGuestVcpus = testDomainGetGuestVcpus, /* 5.7.0 */
+    .domainSetGuestVcpus = testDomainSetGuestVcpus, /* 5.7.0 */
     .domainPinVcpu = testDomainPinVcpu, /* 0.7.3 */
     .domainPinVcpuFlags = testDomainPinVcpuFlags, /* 5.6.0 */
     .domainGetVcpus = testDomainGetVcpus, /* 0.7.3 */
