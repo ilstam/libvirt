@@ -396,6 +396,10 @@ struct _testDomainObjPrivate {
     /* used by get/set time APIs */
     long long seconds;
     unsigned int nseconds;
+
+    /* used by domainSetBlockThreshold */
+    size_t num_thresholds;
+    testBlockThresholdPtr *thresholds;
 };
 
 
@@ -412,6 +416,9 @@ testDomainObjPrivateAlloc(void *opaque)
 
     priv->seconds = 627319920;
     priv->nseconds = 0;
+
+    priv->num_thresholds = 0;
+    priv->thresholds = NULL;
 
     return priv;
 }
@@ -3974,6 +3981,71 @@ testDomainGetBlockIoTune(virDomainPtr dom,
 #undef TEST_SET_PARAM
 
 
+static int
+testDomainSetBlockThreshold(virDomainPtr dom,
+                            const char *dev,
+                            unsigned long long threshold,
+                            unsigned int flags)
+{
+    virDomainObjPtr vm = NULL;
+    virDomainDiskDefPtr disk;
+    testDomainObjPrivatePtr priv;
+    testBlockThresholdPtr blockthreshold = NULL;
+    size_t i;
+    int ret = -1;
+
+    virCheckFlags(0, -1);
+
+    if (!(vm = testDomObjFromDomain(dom)))
+        return -1;
+
+    if (virDomainObjCheckActive(vm) < 0)
+        goto cleanup;
+
+    if (!(disk = virDomainDiskByName(vm->def, dev, true))) {
+        virReportError(VIR_ERR_INVALID_ARG,
+                       _("failed to find disk '%s'"),
+                       dev);
+        goto cleanup;
+    }
+
+    priv = vm->privateData;
+
+    for (i = 0; i < priv->num_thresholds; i++) {
+        if (STREQ(dev, priv->thresholds[i]->name)) {
+            blockthreshold = priv->thresholds[i];
+            break;
+        }
+    }
+
+    if (blockthreshold != NULL) {
+        blockthreshold->threshold = threshold;
+    } else {
+        /* disk not found. add it to the list */
+        if (VIR_ALLOC(blockthreshold) < 0)
+            goto cleanup;
+        if (VIR_STRDUP(blockthreshold->name, dev) < 0)
+            goto cleanup;
+
+        blockthreshold->threshold = threshold;
+
+        if (VIR_APPEND_ELEMENT(priv->thresholds, priv->num_thresholds,
+                               blockthreshold) < 0)
+            goto cleanup;
+    }
+
+    ret = 0;
+
+ cleanup:
+    if (ret < 0 && blockthreshold != NULL) {
+        VIR_FREE(blockthreshold->name);
+        VIR_FREE(blockthreshold);
+    }
+    virDomainObjEndAPI(&vm);
+    return ret;
+}
+
+
 static int testConnectNumOfDefinedDomains(virConnectPtr conn)
 {
     testDriverPtr privconn = conn->privateData;
@@ -5070,10 +5142,12 @@ testDomainDeviceOperation(testDriverPtr driver,
                           virTestDeviceOperation operation,
                           const char *xml,
                           const char *alias,
+                          virDomainObjPtr vm,
                           virDomainDefPtr def)
 {
     virDomainDeviceDefPtr dev = NULL;
     unsigned int parse_flags = VIR_DOMAIN_DEF_PARSE_INACTIVE;
+    size_t i;
     int ret = -1;
 
     if (operation == TEST_DEVICE_DETACH)
@@ -5097,6 +5171,17 @@ testDomainDeviceOperation(testDriverPtr driver,
     case TEST_DEVICE_DETACH:
         if (testDomainDetachDeviceLiveAndConfig(def, dev) < 0)
             goto cleanup;
+
+        if (dev->type == VIR_DOMAIN_DEVICE_DISK) {
+            testDomainObjPrivatePtr priv = vm->privateData;
+
+            for (i = 0; i < priv->num_thresholds; i++) {
+                if (STREQ(dev->data.disk->dst, priv->thresholds[i]->name)) {
+                    VIR_DELETE_ELEMENT(priv->thresholds[i], i, priv->num_thresholds);
+                    break;
+                }
+            }
+        }
         break;
     case TEST_DEVICE_UPDATE:
         if (testDomainUpdateDeviceLiveAndConfig(def, dev) < 0)
@@ -5137,12 +5222,13 @@ testDomainAttachDetachUpdateDevice(virDomainPtr dom,
         goto cleanup;
 
     if (persistentDef) {
-        if (testDomainDeviceOperation(driver, operation, xml, alias, persistentDef) < 0)
+        if (testDomainDeviceOperation(driver, operation, xml, alias, vm,
+                                      persistentDef) < 0)
             goto cleanup;
     }
 
     if (def) {
-        if (testDomainDeviceOperation(driver, operation, xml, alias, def) < 0)
+        if (testDomainDeviceOperation(driver, operation, xml, alias, vm, def) < 0)
             goto cleanup;
     }
 
@@ -10001,6 +10087,7 @@ static virHypervisorDriver testHypervisorDriver = {
     .domainGetInterfaceParameters = testDomainGetInterfaceParameters, /* 5.6.0 */
     .domainSetBlockIoTune = testDomainSetBlockIoTune, /* 5.7.0 */
     .domainGetBlockIoTune = testDomainGetBlockIoTune, /* 5.7.0 */
+    .domainSetBlockThreshold = testDomainSetBlockThreshold, /* 5.7.0 */
     .connectListDefinedDomains = testConnectListDefinedDomains, /* 0.1.11 */
     .connectNumOfDefinedDomains = testConnectNumOfDefinedDomains, /* 0.1.11 */
     .domainCreate = testDomainCreate, /* 0.1.11 */

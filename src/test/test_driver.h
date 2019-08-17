@@ -23,4 +23,13 @@
 
 #include "internal.h"
 
+
+typedef struct _testBlockThreshold testBlockThreshold;
+typedef testBlockThreshold *testBlockThresholdPtr;
+
+struct _testBlockThreshold {
+    char *name;
+    unsigned long long threshold;
+};
+
 int testRegister(void);
